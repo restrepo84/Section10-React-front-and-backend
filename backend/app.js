@@ -1,101 +1,59 @@
-const { validationResult } = require("express-validator");
+const fs = require("fs");
+const path = require("path");
 
-const HttpError = require("../models/http-error");
-const User = require("../models/user");
+const express = require("express");
+const bodyParser = require("body-parser");
+const mongoose = require("mongoose");
 
-const getUsers = async (req, res, next) => {
-  let users;
-  try {
-    users = await User.find({}, "-password");
-  } catch (err) {
-    const error = new HttpError(
-      "Fetching users failed, please try again later.",
-      500
-    );
+const placesRoutes = require("./routes/places-routes");
+const usersRoutes = require("./routes/users-routes");
+const HttpError = require("./models/http-error");
+
+const app = express();
+
+app.use(bodyParser.json());
+
+app.use("/uploads/images", express.static(path.join("uploads", "images")));
+
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+  );
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE");
+
+  next();
+});
+
+app.use("/api/places", placesRoutes);
+app.use("/api/users", usersRoutes);
+
+app.use((req, res, next) => {
+  const error = new HttpError("Could not find this route.", 404);
+  throw error;
+});
+
+app.use((error, req, res, next) => {
+  if (req.file) {
+    fs.unlink(req.file.path, (err) => {
+      console.log(err);
+    });
+  }
+  if (res.headerSent) {
     return next(error);
   }
-  res.json({ users: users.map((user) => user.toObject({ getters: true })) });
-};
+  res.status(error.code || 500);
+  res.json({ message: error.message || "An unknown error occurred!" });
+});
 
-const signup = async (req, res, next) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return next(
-      new HttpError("Invalid inputs passed, please check your data.", 422)
-    );
-  }
-
-  const { name, email, password } = req.body;
-
-  let existingUser;
-  try {
-    existingUser = await User.findOne({ email: email });
-  } catch (err) {
-    const error = new HttpError(
-      "Signing up failed, please try again later.",
-      500
-    );
-    return next(error);
-  }
-
-  if (existingUser) {
-    const error = new HttpError(
-      "User exists already, please login instead.",
-      422
-    );
-    return next(error);
-  }
-
-  const createdUser = new User({
-    name,
-    email,
-    image: req.file.path,
-    password,
-    places: [],
+mongoose
+  .connect(
+    `mongodb+srv://academind:ORlnOPLKvIH9M9hP@cluster0-ntrwp.mongodb.net/mern?retryWrites=true&w=majority`
+  )
+  .then(() => {
+    app.listen(5000);
+  })
+  .catch((err) => {
+    console.log(err);
   });
-
-  try {
-    await createdUser.save();
-  } catch (err) {
-    const error = new HttpError(
-      "Signing up failed, please try again later.",
-      500
-    );
-    return next(error);
-  }
-
-  res.status(201).json({ user: createdUser.toObject({ getters: true }) });
-};
-
-const login = async (req, res, next) => {
-  const { email, password } = req.body;
-
-  let existingUser;
-
-  try {
-    existingUser = await User.findOne({ email: email });
-  } catch (err) {
-    const error = new HttpError(
-      "Loggin in failed, please try again later.",
-      500
-    );
-    return next(error);
-  }
-
-  if (!existingUser || existingUser.password !== password) {
-    const error = new HttpError(
-      "Invalid credentials, could not log you in.",
-      401
-    );
-    return next(error);
-  }
-
-  res.json({
-    message: "Logged in!",
-    user: existingUser.toObject({ getters: true }),
-  });
-};
-
-exports.getUsers = getUsers;
-exports.signup = signup;
-exports.login = login;
